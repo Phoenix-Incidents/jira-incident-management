@@ -21,12 +21,12 @@ gh pr diff <N> -R <owner/repo> --name-only
 ```
 
 - If this PR already has a review from us, this is a **re-review**. Read the earlier review and the author's replies first (`gh api repos/<owner>/<repo>/pulls/<N>/reviews` and `.../issues/<N>/comments`). Then follow "Re-reviews" below instead of a full sweep.
-- Check out the PR head in a **detached worktree in the scratchpad**. Never touch the user's primary checkout. Never symlink the user's node_modules into it.
+- Check out the PR head in a **detached worktree in the scratchpad**. Never touch the user's primary checkout. Never symlink the user's node_modules into it. Use the PR's own repo and its `baseRefName`, not `main`. Run the git commands from a local clone of **that** repo. If there is none, or the current directory is a different repo, clone it into the scratchpad first. If the worktree path already exists from an earlier run, remove it first.
   ```
-  git fetch -q origin main pull/<N>/head:pr-<N>-review
+  git fetch -q origin <baseRefName> pull/<N>/head:pr-<N>-review
   git worktree add -q --detach <scratchpad>/pr<N> pr-<N>-review
   ```
-- Diff against the merge base: `git diff $(git merge-base origin/main HEAD) HEAD`.
+- Diff against the merge base: `git diff $(git merge-base origin/<baseRefName> HEAD) HEAD`.
 
 ## Step 2: Load the standards
 
@@ -34,14 +34,16 @@ Read the repo's `CLAUDE.md` and `AGENTS.md` (and any rules they point to). The r
 
 ## Step 3: Run the checks
 
-In the worktree, install with the repo's package manager (check `packageManager` in package.json) and run type-check, tests and lint. Run this in the background while reviewing. A failing check is a must-fix item.
+Installing and testing runs the PR's code on this machine, with the user's credentials in reach. Only do it when the author is a member of the org or has write access to the repo (`gh api repos/<owner>/<repo>/collaborators/<login>/permission -q .permission` returns `write`, `maintain` or `admin`). For anyone else, skip this step and tell the user why.
+
+In the worktree, install with the repo's package manager (check `packageManager` in package.json) and run type-check, tests and lint. Run this in the background while reviewing. A failing check is a must-fix item only if the PR caused it. If a check fails, run it on the base branch too. Failures that also happen on the base, or that come from the local setup, go in the report to the user, not in the review.
 
 ## Step 4: Review
 
 Do what the built-in `code-review` skill does: read changed files fully, find callers and consumers of anything changed, and check correctness, security, performance and data integrity. Add these on top:
 
 - **Repo standards** from Step 2. Every violation the PR adds is a finding.
-- **Comments, as a separate check.** List every comment the PR adds (`git diff <base> HEAD | grep -E '^\+\s*(//|/\*|\*)'`) and check each one against the repo's comment rules. Typical findings: a comment that repeats the method or variable name, narration of what the code does, mentions of the ticket, PR, wave or caller, roadmap talk ("until X lands"), "legacy" notes about data that never shipped, JSDoc that no longer matches the code, the wrong JSDoc form, lines wrapped short of the repo's width, and em-dashes. Report them as one grouped item with examples, not one item per comment.
+- **Comments, as a separate check.** List every comment the PR adds (`git diff <base> HEAD | grep -E '^\+[[:space:]]*(//|/\*|\*)'`) and check each one against the repo's comment rules. Typical findings: a comment that repeats the method or variable name, narration of what the code does, mentions of the ticket, PR, wave or caller, roadmap talk ("until X lands"), "legacy" notes about data that never shipped, JSDoc that no longer matches the code, the wrong JSDoc form, lines wrapped short of the repo's width, and em-dashes. Report them as one grouped item with examples, not one item per comment.
 - **Regressions for existing users.** Renamed routes, storage keys, persisted shapes or wire contracts that callers (including other repos) still use.
 - **Duplication.** Code copied from an existing module instead of shared.
 - **Missing tests** for risky paths, and tests that only cover the happy path.
@@ -113,7 +115,7 @@ gh pr review <N> -R <owner/repo> --approve --body-file <file>
 
 If GitHub refuses `--approve` or `--request-changes` (for example on your own PR), post with `--comment` and tell the user.
 
-Confirm with `gh pr view <N> -R <owner/repo> --json reviewDecision -q .reviewDecision`. Then remove the worktree and the temp branch:
+Confirm with `gh pr view <N> -R <owner/repo> --json reviewDecision -q .reviewDecision`. Then remove the worktree and the temp branch. Do this on every exit, including when a check, the review or a `gh` command failed:
 
 ```
 git worktree remove --force <scratchpad>/pr<N>
